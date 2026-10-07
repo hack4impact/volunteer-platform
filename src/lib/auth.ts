@@ -1,11 +1,9 @@
 import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
+import bcrypt from "bcryptjs";
 import { z } from "zod";
+import { db } from "@/lib/db";
 import type { AppRole } from "@/types";
-
-// TODO: replace with real database auth
-const DEV_EMAIL = "admin@hack4impact.org";
-const DEV_PASSWORD = "password";
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   session: { strategy: "jwt" },
@@ -22,17 +20,20 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
 
         if (!parsed.success) return null;
 
-        if (
-          parsed.data.email !== DEV_EMAIL ||
-          parsed.data.password !== DEV_PASSWORD
-        )
-          return null;
+        const user = await db.user.findUnique({
+          where: { email: parsed.data.email },
+        });
+        if (!user?.password) return null;
+
+        const valid = await bcrypt.compare(parsed.data.password, user.password);
+        if (!valid) return null;
 
         return {
-          id: "dev-admin",
-          name: "Admin",
-          email: DEV_EMAIL,
-          role: "ADMIN",
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          role: user.role,
+          chapterId: user.chapterId,
         };
       },
     }),
@@ -40,12 +41,15 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   callbacks: {
     jwt({ token, user }) {
       if (user) {
-        token.role = (user as { role?: AppRole }).role ?? "ADMIN";
+        token.role = user.role;
+        token.chapterId = user.chapterId;
       }
       return token;
     },
     session({ session, token }) {
+      session.user.id = token.sub!;
       session.user.role = token.role as AppRole;
+      session.user.chapterId = token.chapterId as string | null;
       return session;
     },
   },

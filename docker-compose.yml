@@ -1,0 +1,21 @@
+services:
+  dev-db:
+    container_name: volunteer-platform-db
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: volunteer_platform
+    ports:
+      - "5432:5432"
+    volumes:
+      - dev-db-volume:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d volunteer_platform"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  dev-db-volume:

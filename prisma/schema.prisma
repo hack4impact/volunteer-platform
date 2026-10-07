@@ -18,6 +18,152 @@ model User {
   email     String   @unique
   password  String?
   role      Role     @default(ADMIN)
+  chapterId String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  chapter         Chapter?             @relation(fields: [chapterId], references: [id], onDelete: SetNull)
+  sourcedProjects SourcedProject[]
+  requestedClaims ProjectClaim[]       @relation("ClaimRequestedBy")
+  resolvedClaims  ProjectClaim[]       @relation("ClaimResolvedBy")
+  addedLinks      SourcedProjectLink[]
+
+  @@index([chapterId])
+}
+
+// Minimal local chapter record so listings, claims, and the JWT have a stable
+// chapter id to reference. Stand-in until chapter data is served by Ops API.
+model Chapter {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  region    String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  members         User[]
+  sourcedProjects SourcedProject[]
+  claims          ProjectClaim[]
+}
+
+// ---------------------------------------------------------------------------
+// Sourced Project Exchange
+// ---------------------------------------------------------------------------
+
+enum SourcedProjectStatus {
+  AVAILABLE
+  CLAIM_PENDING
+  CLAIMED
+  IN_PROGRESS
+  COMPLETED
+  ARCHIVED
+}
+
+enum CauseArea {
+  HEALTH
+  EDUCATION
+  FOOD_SECURITY
+  HOUSING
+  ENVIRONMENT
+  ECONOMIC_OPPORTUNITY
+  ARTS_AND_CULTURE
+  CIVIC_ENGAGEMENT
+  OTHER
+}
+
+enum ClaimStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  WITHDRAWN
+  EXPIRED
+  ABANDONED
+}
+
+enum LinkType {
+  REPO
+  SCOPING_DOC
+  DESIGN_FILE
+  DELIVERABLE
+  OTHER
+}
+
+// A vetted but unstaffed nonprofit project posted by its sourcing chapter.
+// Client* fields and partnerNotes are gated: they must be stripped server-side
+// for roles that are not permitted to see them. Never hard-deleted; use
+// withdrawnAt / status instead.
+model SourcedProject {
+  id                String               @id @default(cuid())
+  title             String
+  description       String
+  scope             String
+  causeArea         CauseArea
+  techContext       String?
+  status            SourcedProjectStatus @default(AVAILABLE)
+  handoffNotes      String
+  sourcingChapterId String
+  sourcedById       String?
+  postedAt          DateTime             @default(now())
+  lastVerifiedAt    DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+  withdrawnAt       DateTime?
+
+  // Gated fields
+  clientOrgName      String
+  clientContactName  String
+  clientContactEmail String
+  clientContactPhone String?
+  partnerNotes       String?
+
+  sourcingChapter Chapter              @relation(fields: [sourcingChapterId], references: [id], onDelete: Restrict)
+  sourcedBy       User?                @relation(fields: [sourcedById], references: [id], onDelete: SetNull)
+  claims          ProjectClaim[]
+  links           SourcedProjectLink[]
+
+  @@index([status])
+  @@index([sourcingChapterId])
+  @@index([causeArea])
+  @@map("sourced_project")
+}
+
+// One claim attempt on a listing. Kept after rejection/abandonment so history
+// survives. At most one PENDING or APPROVED claim per listing is enforced by a
+// partial unique index in the migration (Prisma can't express it).
+model ProjectClaim {
+  id                String      @id @default(cuid())
+  sourcedProjectId  String
+  claimingChapterId String
+  requestedById     String
+  status            ClaimStatus @default(PENDING)
+  message           String?
+  requestedAt       DateTime    @default(now())
+  resolvedAt        DateTime?
+  resolvedById      String?
+
+  sourcedProject  SourcedProject @relation(fields: [sourcedProjectId], references: [id], onDelete: Restrict)
+  claimingChapter Chapter        @relation(fields: [claimingChapterId], references: [id], onDelete: Restrict)
+  requestedBy     User           @relation("ClaimRequestedBy", fields: [requestedById], references: [id], onDelete: Restrict)
+  resolvedBy      User?          @relation("ClaimResolvedBy", fields: [resolvedById], references: [id], onDelete: SetNull)
+
+  @@index([sourcedProjectId])
+  @@index([claimingChapterId])
+  @@index([status])
+  @@map("project_claim")
+}
+
+// Artifact from prior work attached to a listing (repo, scoping doc, etc.).
+model SourcedProjectLink {
+  id               String   @id @default(cuid())
+  sourcedProjectId String
+  label            String
+  url              String
+  linkType         LinkType @default(OTHER)
+  addedById        String
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  sourcedProject SourcedProject @relation(fields: [sourcedProjectId], references: [id], onDelete: Cascade)
+  addedBy        User           @relation(fields: [addedById], references: [id], onDelete: Restrict)
+
+  @@index([sourcedProjectId])
+  @@map("sourced_project_link")
 }
